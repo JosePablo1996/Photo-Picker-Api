@@ -10,9 +10,9 @@ from mysql.connector import Error
 import shutil
 from pathlib import Path
 import urllib.parse
-from dotenv import load_dotenv  # ← Importar para usar .env
+from dotenv import load_dotenv
 
-# Cargar variables de entorno desde el archivo .env
+# Cargar variables de entorno
 load_dotenv()
 
 app = FastAPI(title="Photo Picker API", version="1.0.0")
@@ -26,22 +26,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configuración de base de datos (usando variables de entorno)
+# Configuración de base de datos mejorada
 def get_db_config():
-    # Para Render: usa ClearDB MySQL
+    # Para Render con ClearDB MySQL
     if os.environ.get('RENDER'):
         database_url = os.environ.get('CLEARDB_DATABASE_URL', '')
         if database_url:
-            url = urllib.parse.urlparse(database_url)
-            return {
-                'host': url.hostname,
-                'database': url.path[1:],
-                'user': url.username,
-                'password': url.password,
-                'port': url.port or 3306
-            }
+            try:
+                url = urllib.parse.urlparse(database_url)
+                return {
+                    'host': url.hostname,
+                    'database': url.path[1:],
+                    'user': url.username,
+                    'password': url.password,
+                    'port': url.port or 3306
+                }
+            except:
+                pass
     
-    # Para desarrollo local (usando variables de .env)
+    # Para Docker con MySQL
+    if os.environ.get('DOCKER_ENV'):
+        return {
+            'host': os.getenv('DB_HOST', 'mysql'),
+            'database': os.getenv('DB_NAME', 'photo_picker_db'),
+            'user': os.getenv('DB_USER', 'root'),
+            'password': os.getenv('DB_PASSWORD', 'password'),
+            'port': int(os.getenv('DB_PORT', 3306))
+        }
+    
+    # Para desarrollo local
     return {
         'host': os.getenv('DB_HOST', 'localhost'),
         'database': os.getenv('DB_NAME', 'photo_picker_db'),
@@ -52,18 +65,27 @@ def get_db_config():
 
 DB_CONFIG = get_db_config()
 
-# Directorio para uploads (en Render usa /tmp/ para persistencia)
-UPLOAD_DIR = os.getenv('UPLOAD_DIR', 'uploads')
+# Directorio para uploads (compatible con Docker y Render)
+UPLOAD_DIR = os.getenv('UPLOAD_DIR', '/app/uploads' if os.environ.get('DOCKER_ENV') else 'uploads')
 Path(UPLOAD_DIR).mkdir(exist_ok=True)
 
-def get_db_connection():
-    try:
-        connection = mysql.connector.connect(**DB_CONFIG)
-        return connection
-    except Error as e:
-        print(f"Error connecting to MySQL: {e}")
-        return None
+# Función de conexión a BD con reintentos
+def get_db_connection(max_retries=3, delay=2):
+    import time
+    for attempt in range(max_retries):
+        try:
+            connection = mysql.connector.connect(**DB_CONFIG)
+            print(f"✅ Database connection successful (attempt {attempt + 1})")
+            return connection
+        except Error as e:
+            print(f"❌ Database connection failed (attempt {attempt + 1}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+            else:
+                print("❌ Max retries reached, could not connect to database")
+                return None
 
+# Crear tabla con verificación mejorada
 def create_table():
     connection = get_db_connection()
     if connection:
@@ -84,20 +106,32 @@ def create_table():
                 )
             """)
             connection.commit()
-            print("✅ Table created successfully")
+            print("✅ Table created successfully or already exists")
+            
+            # Verificar si la tabla tiene datos
+            cursor.execute("SELECT COUNT(*) as count FROM images")
+            result = cursor.fetchone()
+            print(f"📊 Total images in database: {result[0]}")
+            
         except Error as e:
             print(f"❌ Error creating table: {e}")
         finally:
             connection.close()
+    else:
+        print("⚠️  Could not create table - no database connection")
 
+# Intentar crear tabla al iniciar (con reintentos)
+import time
+time.sleep(2)  # Esperar para que la BD esté lista en Docker
 create_table()
 
 @app.get("/")
 async def root():
     return {
-        "message": "Photo Picker API is running on Render!",
+        "message": "Photo Picker API is running!",
         "status": "success",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "environment": "docker" if os.environ.get('DOCKER_ENV') else "render" if os.environ.get('RENDER') else "development"
     }
 
 @app.post("/upload")
@@ -114,11 +148,13 @@ async def upload_image(
         filename = f"{image_id}{file_extension}"
         filepath = os.path.join(UPLOAD_DIR, filename)
 
+        # Guardar archivo
         with open(filepath, "wb") as buffer:
             shutil.copyfileobj(image.file, buffer)
 
         file_size = os.path.getsize(filepath)
 
+        # Insertar en BD
         connection = get_db_connection()
         if connection:
             try:
@@ -133,9 +169,17 @@ async def upload_image(
                 raise HTTPException(status_code=500, detail=f"Database error: {e}")
             finally:
                 connection.close()
+        else:
+            raise HTTPException(status_code=500, detail="Database connection failed")
 
-        # URL para Render
-        base_url = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:8000')
+        # Generar URL
+        if os.environ.get('RENDER'):
+            base_url = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:8000')
+        elif os.environ.get('DOCKER_ENV'):
+            base_url = os.environ.get('DOCKER_HOST', 'http://localhost:8000')
+        else:
+            base_url = 'http://localhost:8000'
+            
         image_url = f"{base_url}/images/{filename}"
 
         return JSONResponse({
@@ -162,7 +206,14 @@ async def get_all_images():
             images = cursor.fetchall()
             connection.close()
 
-            base_url = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:8000')
+            # Determinar base URL
+            if os.environ.get('RENDER'):
+                base_url = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:8000')
+            elif os.environ.get('DOCKER_ENV'):
+                base_url = os.environ.get('DOCKER_HOST', 'http://localhost:8000')
+            else:
+                base_url = 'http://localhost:8000'
+
             result = [{
                 "id": img['image_id'],
                 "url": f"{base_url}/images/{img['filename']}",
@@ -173,6 +224,8 @@ async def get_all_images():
             } for img in images]
 
             return {"success": True, "images": result}
+        else:
+            return {"success": False, "images": [], "error": "Database connection failed"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
@@ -190,11 +243,19 @@ async def health_check():
     if connection:
         connection.close()
     
+    upload_dir_exists = os.path.exists(UPLOAD_DIR)
+    upload_dir_writable = os.access(UPLOAD_DIR, os.W_OK)
+    
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "database": db_status,
-        "environment": "production" if os.environ.get('RENDER') else "development"
+        "upload_directory": {
+            "exists": upload_dir_exists,
+            "writable": upload_dir_writable,
+            "path": UPLOAD_DIR
+        },
+        "environment": "docker" if os.environ.get('DOCKER_ENV') else "render" if os.environ.get('RENDER') else "development"
     }
 
 if __name__ == "__main__":

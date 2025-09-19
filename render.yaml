@@ -1,10 +1,37 @@
+# render.yaml
 services:
   - type: web
     name: photo-picker-api
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    startCommand: python main.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.0
+      - key: UPLOAD_DIR
+        value: uploads
+      - key: DB_HOST
+        fromDatabase:
+          name: photo-picker-db
+          property: host
+      - key: DB_NAME
+        fromDatabase:
+          name: photo-picker-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: photo-picker-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: photo-picker-db
+          property: password
+      - key: DB_PORT
+        value: 3306
+
+databases:
+  - name: photo-picker-db
+    plan: free
+    databaseName: photo_picker_db
+    user: photo_picker_user
