@@ -26,56 +26,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configuración de base de datos mejorada
+# Configuración de base de datos mejorada para MySQL Workbench
 def get_db_config():
-    # Para Render con ClearDB MySQL
-    if os.environ.get('RENDER'):
-        database_url = os.environ.get('CLEARDB_DATABASE_URL', '')
-        if database_url:
-            try:
-                url = urllib.parse.urlparse(database_url)
-                return {
-                    'host': url.hostname,
-                    'database': url.path[1:],
-                    'user': url.username,
-                    'password': url.password,
-                    'port': url.port or 3306
-                }
-            except:
-                pass
-    
-    # Para Docker con MySQL
-    if os.environ.get('DOCKER_ENV'):
-        return {
-            'host': os.getenv('DB_HOST', 'mysql'),
-            'database': os.getenv('DB_NAME', 'photo_picker_db'),
-            'user': os.getenv('DB_USER', 'root'),
-            'password': os.getenv('DB_PASSWORD', 'password'),
-            'port': int(os.getenv('DB_PORT', 3306))
-        }
-    
-    # Para desarrollo local
+    # Para desarrollo local con MySQL Workbench
     return {
-        'host': os.getenv('DB_HOST', 'localhost'),
+        'host': os.getenv('DB_HOST', '127.0.0.1'),
         'database': os.getenv('DB_NAME', 'photo_picker_db'),
         'user': os.getenv('DB_USER', 'root'),
         'password': os.getenv('DB_PASSWORD', ''),
-        'port': int(os.getenv('DB_PORT', 3377))
+        'port': int(os.getenv('DB_PORT', 3377)),
+        'charset': 'utf8mb4',
+        'collation': 'utf8mb4_unicode_ci',
+        'autocommit': True
     }
 
 DB_CONFIG = get_db_config()
 
-# Directorio para uploads (compatible con Docker y Render)
-UPLOAD_DIR = os.getenv('UPLOAD_DIR', '/app/uploads' if os.environ.get('DOCKER_ENV') else 'uploads')
+# Directorio para uploads
+UPLOAD_DIR = os.getenv('UPLOAD_DIR', 'uploads')
 Path(UPLOAD_DIR).mkdir(exist_ok=True)
 
-# Función de conexión a BD con reintentos
+# Función de conexión a BD con reintentos y verificación mejorada
 def get_db_connection(max_retries=3, delay=2):
     import time
     for attempt in range(max_retries):
         try:
             connection = mysql.connector.connect(**DB_CONFIG)
             print(f"✅ Database connection successful (attempt {attempt + 1})")
+            
+            # Verificar que la base de datos existe
+            cursor = connection.cursor()
+            cursor.execute("SHOW DATABASES LIKE %s", (DB_CONFIG['database'],))
+            result = cursor.fetchone()
+            
+            if not result:
+                print(f"❌ Database '{DB_CONFIG['database']}' does not exist")
+                connection.close()
+                return None
+                
+            print(f"✅ Database '{DB_CONFIG['database']}' exists")
             return connection
         except Error as e:
             print(f"❌ Database connection failed (attempt {attempt + 1}): {e}")
@@ -91,22 +80,41 @@ def create_table():
     if connection:
         try:
             cursor = connection.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS images (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    image_id VARCHAR(36) NOT NULL UNIQUE,
-                    filename VARCHAR(255) NOT NULL,
-                    filepath VARCHAR(500) NOT NULL,
-                    description TEXT,
-                    upload_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    file_size BIGINT,
-                    mime_type VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                )
-            """)
-            connection.commit()
-            print("✅ Table created successfully or already exists")
+            
+            # Seleccionar la base de datos
+            cursor.execute(f"USE {DB_CONFIG['database']}")
+            
+            # Verificar si la tabla ya existe
+            cursor.execute("SHOW TABLES LIKE 'images'")
+            table_exists = cursor.fetchone()
+            
+            if table_exists:
+                print("✅ Table 'images' already exists")
+                
+                # Verificar la estructura de la tabla
+                cursor.execute("DESCRIBE images")
+                columns = cursor.fetchall()
+                print("📋 Table structure:")
+                for column in columns:
+                    print(f"  - {column[0]}: {column[1]}")
+            else:
+                # Crear la tabla si no existe
+                cursor.execute("""
+                    CREATE TABLE images (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        image_id VARCHAR(36) NOT NULL UNIQUE,
+                        filename VARCHAR(255) NOT NULL,
+                        filepath VARCHAR(500) NOT NULL,
+                        description TEXT,
+                        upload_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        file_size BIGINT,
+                        mime_type VARCHAR(100),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    )
+                """)
+                connection.commit()
+                print("✅ Table 'images' created successfully")
             
             # Verificar si la tabla tiene datos
             cursor.execute("SELECT COUNT(*) as count FROM images")
@@ -114,15 +122,19 @@ def create_table():
             print(f"📊 Total images in database: {result[0]}")
             
         except Error as e:
-            print(f"❌ Error creating table: {e}")
+            print(f"❌ Error creating/verifying table: {e}")
         finally:
             connection.close()
     else:
         print("⚠️  Could not create table - no database connection")
 
+# Verificar conexión al iniciar
+print("🔍 Attempting to connect to database...")
+print(f"📋 Connection parameters: {DB_CONFIG}")
+
 # Intentar crear tabla al iniciar (con reintentos)
 import time
-time.sleep(2)  # Esperar para que la BD esté lista en Docker
+time.sleep(2)  # Esperar para que la BD esté lista
 create_table()
 
 @app.get("/")
@@ -131,7 +143,13 @@ async def root():
         "message": "Photo Picker API is running!",
         "status": "success",
         "timestamp": datetime.now().isoformat(),
-        "environment": "docker" if os.environ.get('DOCKER_ENV') else "render" if os.environ.get('RENDER') else "development"
+        "database_config": {
+            "host": DB_CONFIG['host'],
+            "database": DB_CONFIG['database'],
+            "port": DB_CONFIG['port'],
+            "user": DB_CONFIG['user']
+        },
+        "environment": "development"
     }
 
 @app.post("/upload")
@@ -173,13 +191,7 @@ async def upload_image(
             raise HTTPException(status_code=500, detail="Database connection failed")
 
         # Generar URL
-        if os.environ.get('RENDER'):
-            base_url = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:8000')
-        elif os.environ.get('DOCKER_ENV'):
-            base_url = os.environ.get('DOCKER_HOST', 'http://localhost:8000')
-        else:
-            base_url = 'http://localhost:8000'
-            
+        base_url = 'http://localhost:8000'
         image_url = f"{base_url}/images/{filename}"
 
         return JSONResponse({
@@ -207,12 +219,7 @@ async def get_all_images():
             connection.close()
 
             # Determinar base URL
-            if os.environ.get('RENDER'):
-                base_url = os.environ.get('RENDER_EXTERNAL_URL', 'http://localhost:8000')
-            elif os.environ.get('DOCKER_ENV'):
-                base_url = os.environ.get('DOCKER_HOST', 'http://localhost:8000')
-            else:
-                base_url = 'http://localhost:8000'
+            base_url = 'http://localhost:8000'
 
             result = [{
                 "id": img['image_id'],
@@ -255,8 +262,52 @@ async def health_check():
             "writable": upload_dir_writable,
             "path": UPLOAD_DIR
         },
-        "environment": "docker" if os.environ.get('DOCKER_ENV') else "render" if os.environ.get('RENDER') else "development"
+        "database_config": {
+            "host": DB_CONFIG['host'],
+            "database": DB_CONFIG['database'],
+            "port": DB_CONFIG['port'],
+            "user": DB_CONFIG['user']
+        }
     }
+
+@app.get("/db-info")
+async def db_info():
+    """Endpoint para obtener información detallada de la base de datos"""
+    connection = get_db_connection()
+    if not connection:
+        return {"success": False, "error": "No database connection"}
+    
+    try:
+        cursor = connection.cursor(dictionary=True)
+        
+        # Información de la base de datos
+        cursor.execute("SELECT DATABASE() as db_name")
+        db_name = cursor.fetchone()
+        
+        # Información de las tablas
+        cursor.execute("SHOW TABLES")
+        tables = cursor.fetchall()
+        
+        # Información de la tabla images
+        cursor.execute("DESCRIBE images")
+        columns = cursor.fetchall()
+        
+        # Contar registros
+        cursor.execute("SELECT COUNT(*) as count FROM images")
+        count = cursor.fetchone()
+        
+        return {
+            "success": True,
+            "database": db_name['db_name'],
+            "tables": [table for table in tables],
+            "images_table_columns": columns,
+            "total_images": count['count']
+        }
+        
+    except Error as e:
+        return {"success": False, "error": str(e)}
+    finally:
+        connection.close()
 
 if __name__ == "__main__":
     import uvicorn

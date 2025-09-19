@@ -1,7 +1,45 @@
-# Crear archivo .gitignore
-echo "/venv/" > .gitignore
-echo "__pycache__/" >> .gitignore
-echo "*.pyc" >> .gitignore
-echo "*.pyo" >> .gitignore
-echo ".env" >> .gitignore
-echo "uploads/" >> .gitignore
+# Entornos virtuales de Python
+venv/
+env/
+ENV/
+.venv/
+
+# Archivos de cache de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Variables de entorno
+.env
+.env.local
+.env.production
+.env.development
+*.env
+
+# Directorio de uploads (pero no el README)
+uploads/
+!uploads/README.md
+
+# Configuración de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de base de datos local
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos temporales
+temp/
+tmp/

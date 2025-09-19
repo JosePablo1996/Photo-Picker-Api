@@ -5,12 +5,16 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.9.0
+        value: 3.11.0
       - key: UPLOAD_DIR
-        value: uploads
+        value: /tmp/uploads
+      - key: PORT
+        value: 10000
+      - key: RENDER
+        value: true
       - key: DB_HOST
         fromDatabase:
           name: photo-picker-db
@@ -28,10 +32,13 @@ services:
           name: photo-picker-db
           property: password
       - key: DB_PORT
-        value: 3306
+        fromDatabase:
+          name: photo-picker-db
+          property: port
 
 databases:
   - name: photo-picker-db
     plan: free
     databaseName: photo_picker_db
     user: photo_picker_user
+    ipAllowList: []  # Permitir acceso solo desde Render
