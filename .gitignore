@@ -1,4 +1,7 @@
-.env
-.env.local
-.env.production
-*.env
+# Crear archivo .gitignore
+echo "/venv/" > .gitignore
+echo "__pycache__/" >> .gitignore
+echo "*.pyc" >> .gitignore
+echo "*.pyo" >> .gitignore
+echo ".env" >> .gitignore
+echo "uploads/" >> .gitignore
