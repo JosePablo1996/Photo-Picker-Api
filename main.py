@@ -10,6 +10,10 @@ from mysql.connector import Error
 import shutil
 from pathlib import Path
 import urllib.parse
+from dotenv import load_dotenv  # ← Importar para usar .env
+
+# Cargar variables de entorno desde el archivo .env
+load_dotenv()
 
 app = FastAPI(title="Photo Picker API", version="1.0.0")
 
@@ -22,7 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configuración de base de datos para Render (usando variables de entorno)
+# Configuración de base de datos (usando variables de entorno)
 def get_db_config():
     # Para Render: usa ClearDB MySQL
     if os.environ.get('RENDER'):
@@ -37,19 +41,19 @@ def get_db_config():
                 'port': url.port or 3306
             }
     
-    # Para desarrollo local (tu XAMPP)
+    # Para desarrollo local (usando variables de .env)
     return {
-        'host': 'localhost',
-        'database': 'photo_picker_db',
-        'user': 'root',
-        'password': '',
-        'port': 3377
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'database': os.getenv('DB_NAME', 'photo_picker_db'),
+        'user': os.getenv('DB_USER', 'root'),
+        'password': os.getenv('DB_PASSWORD', ''),
+        'port': int(os.getenv('DB_PORT', 3377))
     }
 
 DB_CONFIG = get_db_config()
 
 # Directorio para uploads (en Render usa /tmp/ para persistencia)
-UPLOAD_DIR = os.environ.get('UPLOAD_DIR', 'uploads')
+UPLOAD_DIR = os.getenv('UPLOAD_DIR', 'uploads')
 Path(UPLOAD_DIR).mkdir(exist_ok=True)
 
 def get_db_connection():
