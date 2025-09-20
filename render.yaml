@@ -1,44 +1,49 @@
 # render.yaml
 services:
+  # Servicio principal de la API
   - type: web
     name: photo-picker-api
     env: python
-    plan: free
+    region: ohio  # Puedes cambiar a us-east, us-west, etc.
+    plan: free  # O upgrade a starter, standard, etc.
+    branch: main
+    
+    # Comandos de construcción
     buildCommand: pip install -r requirements.txt
+    
+    # Comando de inicio
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    
+    # Variables de entorno
     envVars:
+      - key: DB_HOST
+        fromSecret: DB_HOST
+      - key: DB_PORT
+        fromSecret: DB_PORT
+      - key: DB_NAME
+        fromSecret: DB_NAME
+      - key: DB_USER
+        fromSecret: DB_USER
+      - key: DB_PASSWORD
+        fromSecret: DB_PASSWORD
+      - key: UPLOAD_DIR
+        value: uploads
+      - key: THUMBNAIL_DIR
+        value: thumbnails
       - key: PYTHON_VERSION
         value: 3.11.0
-      - key: UPLOAD_DIR
-        value: /tmp/uploads
-      - key: PORT
-        value: 10000
-      - key: RENDER
-        value: true
-      - key: DB_HOST
-        fromDatabase:
-          name: photo-picker-db
-          property: host
-      - key: DB_NAME
-        fromDatabase:
-          name: photo-picker-db
-          property: database
-      - key: DB_USER
-        fromDatabase:
-          name: photo-picker-db
-          property: user
-      - key: DB_PASSWORD
-        fromDatabase:
-          name: photo-picker-db
-          property: password
-      - key: DB_PORT
-        fromDatabase:
-          name: photo-picker-db
-          property: port
+    
+    # Health check path
+    healthCheckPath: /health
+    
+    # Configuración de disco (necesario para almacenar archivos)
+    disk:
+      name: uploads
+      mountPath: /opt/render/project/src/uploads
+      sizeGB: 1
 
-databases:
-  - name: photo-picker-db
-    plan: free
-    databaseName: photo_picker_db
-    user: photo_picker_user
-    ipAllowList: []  # Permitir acceso solo desde Render
+    # Auto-deploy configuration
+    autoDeploy: true
+
+# Secrets que necesitas configurar en el dashboard de Render
+# DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
