@@ -11,19 +11,23 @@ from datetime import datetime
 import uuid
 from dotenv import load_dotenv
 
-# Cargar variables de entorno
+# Cargar variables de entorno solo en desarrollo local
 load_dotenv()
 
 # Configuración desde variables de entorno
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST", "20.84.99.214")
+DB_PORT = os.getenv("DB_PORT", "443")
+DB_NAME = os.getenv("DB_NAME", "PhotoPickerAPI")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "uPxBHn]Ag9H~N4'K")
 
-# Validar que todas las variables estén presentes
-if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
-    raise ValueError("Faltan variables de entorno para la conexión a la base de datos")
+# Validar que todas las variables críticas estén presentes
+required_vars = ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"]
+missing_vars = [var for var in required_vars if not os.getenv(var) and not globals().get(var)]
+
+if missing_vars:
+    print(f"Advertencia: Variables de entorno faltantes: {missing_vars}")
+    print("Usando valores por defecto...")
 
 # Codificar la contraseña para la URL
 ENCODED_PASSWORD = quote_plus(DB_PASSWORD)
@@ -32,9 +36,14 @@ ENCODED_PASSWORD = quote_plus(DB_PASSWORD)
 DATABASE_URL = f"postgresql://{DB_USER}:{ENCODED_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Configuración de SQLAlchemy
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-Base = declarative_base()
+try:
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base = declarative_base()
+    print(f"✅ Conectado a la base de datos: {DB_NAME} en {DB_HOST}:{DB_PORT}")
+except Exception as e:
+    print(f"❌ Error conectando a la base de datos: {e}")
+    raise
 
 # Modelo de la base de datos para imágenes
 class Image(Base):
@@ -59,7 +68,11 @@ class Image(Base):
     app_version = Column(String(50))
 
 # Crear las tablas en la base de datos
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+    print("✅ Tablas de la base de datos creadas/verificadas correctamente")
+except Exception as e:
+    print(f"❌ Error creando tablas: {e}")
 
 # Esquemas Pydantic
 class ImageSchema(BaseModel):
@@ -104,7 +117,11 @@ class ImageResponseSchema(BaseModel):
         orm_mode = True
 
 # Instancia de la aplicación FastAPI
-app = FastAPI(title="Photo Picker API", version="1.0.0")
+app = FastAPI(
+    title="Photo Picker API", 
+    version="1.0.0",
+    description="API para subir y gestionar imágenes desde aplicaciones Android"
+)
 
 # Configuración de CORS
 origins = ["*"]
@@ -140,7 +157,8 @@ def read_root():
     return {
         "message": "Photo Picker API está funcionando correctamente",
         "database": DB_NAME,
-        "host": DB_HOST
+        "host": DB_HOST,
+        "status": "active"
     }
 
 @app.get("/health")
@@ -152,10 +170,24 @@ def health_check(db: Session = Depends(get_db)):
         return {
             "status": "healthy",
             "database": "connected",
-            "timestamp": datetime.now().isoformat()
+            "database_name": DB_NAME,
+            "timestamp": datetime.now().isoformat(),
+            "environment": "production" if os.getenv("RENDER") else "development"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error de conexión a la base de datos: {str(e)}")
+
+@app.get("/config")
+def show_config():
+    """Endpoint para mostrar la configuración actual (útil para debugging)"""
+    return {
+        "db_host": DB_HOST,
+        "db_port": DB_PORT,
+        "db_name": DB_NAME,
+        "db_user": DB_USER,
+        "upload_dir": UPLOAD_DIR,
+        "thumbnail_dir": THUMBNAIL_DIR
+    }
 
 @app.get("/images/")
 def get_images(
@@ -291,7 +323,14 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", 8000))
     
-    print(f"Iniciando servidor en {host}:{port}")
-    print(f"Base de datos: {DB_NAME} en {DB_HOST}:{DB_PORT}")
+    print("=" * 50)
+    print("🚀 Iniciando Photo Picker API")
+    print("=" * 50)
+    print(f"📊 Base de datos: {DB_NAME}")
+    print(f"🌐 Host: {DB_HOST}:{DB_PORT}")
+    print(f"👤 Usuario: {DB_USER}")
+    print(f"📁 Directorio uploads: {UPLOAD_DIR}")
+    print(f"🔗 URL de conexión: postgresql://{DB_USER}:******@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+    print("=" * 50)
     
     uvicorn.run(app, host=host, port=port)
