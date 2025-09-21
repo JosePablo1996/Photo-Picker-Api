@@ -5,14 +5,16 @@ services:
     name: photo-picker-api
     env: python
     region: ohio  # Puedes cambiar a us-east, us-west, etc.
-    plan: free  # O upgrade a starter, standard, etc.
+    plan: free  # O upgrade to starter, standard, etc.
     branch: main
     
     # Comandos de construcción
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
     
     # Comando de inicio
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 300
     
     # Variables de entorno
     envVars:
@@ -32,6 +34,12 @@ services:
         value: thumbnails
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: PGSSLMODE
+        value: require
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8000
     
     # Health check path
     healthCheckPath: /health

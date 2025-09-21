@@ -1,8 +1,5 @@
-# Opción 1: Para entornos de producción con múltiples workers
-web: uvicorn main:app --host=0.0.0.0 --port=$PORT --workers=2 --timeout-keep-alive=30
+# Procfile optimizado para Render.com
+web: uvicorn main:app --host=0.0.0.0 --port=$PORT --timeout-keep-alive=300 --log-level=info
 
-# Opción 2: Para desarrollo o debugging
-web: uvicorn main:app --host=0.0.0.0 --port=$PORT --reload
-
-# Opción 3: Con nivel de log configurado
-web: uvicorn main:app --host=0.0.0.0 --port=$PORT --workers=2 --log-level=info
+# Opción alternativa para desarrollo (no usar en producción)
+# web: uvicorn main:app --host=0.0.0.0 --port=$PORT --reload --log-level=debug

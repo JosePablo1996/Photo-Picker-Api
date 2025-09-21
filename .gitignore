@@ -3,43 +3,119 @@ venv/
 env/
 ENV/
 .venv/
+venv.bak/
+.env.bak/
 
 # Archivos de cache de Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Variables de entorno
+# Variables de entorno y configuraciones sensibles
 .env
 .env.local
 .env.production
 .env.development
+.env.test
 *.env
+.envrc
+secrets.ini
+config.ini
+credentials.json
+*.key
+*.pem
+*.cert
 
-# Directorio de uploads (pero no el README)
-uploads/
+# Directorios de uploads y archivos (pero no el README)
+uploads/*
 !uploads/README.md
+!uploads/.gitkeep
+thumbnails/*
+!thumbnails/README.md
+!thumbnails/.gitkeep
 
 # Configuración de IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.nova/
+.ropeproject
 
 # Logs
 *.log
 logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
 
 # Archivos de sistema
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
 # Archivos de base de datos local
 *.db
 *.sqlite
 *.sqlite3
+*.db-journal
 
 # Archivos temporales
 temp/
 tmp/
+*.tmp
+*.temp
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*,cover
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Windows
+[Tt]humbs.db
+
+# Render specific
+.render/
+
+# Python packaging
+.pytest_cache/
+.mypy_cache/
+.tox/

@@ -16,9 +16,9 @@ load_dotenv()
 
 # Configuración desde variables de entorno
 DB_HOST = os.getenv("DB_HOST", "20.84.99.214")
-DB_PORT = os.getenv("DB_PORT", "443")
+DB_PORT = os.getenv("DB_PORT", "443")  # Puerto 443 para PostgreSQL
 DB_NAME = os.getenv("DB_NAME", "PhotoPickerAPI")
-DB_USER = os.getenv("DB_USER", "postgres")
+DB_USER = os.getenv("DB_USER", "photopicker_user")  # Usuario correcto
 DB_PASSWORD = os.getenv("DB_PASSWORD", "uPxBHn]Ag9H~N4'K")
 
 # Validar que todas las variables críticas estén presentes
@@ -32,12 +32,12 @@ if missing_vars:
 # Codificar la contraseña para la URL
 ENCODED_PASSWORD = quote_plus(DB_PASSWORD)
 
-# Cadena de conexión a PostgreSQL
+# Cadena de conexión a PostgreSQL con puerto 443
 DATABASE_URL = f"postgresql://{DB_USER}:{ENCODED_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Configuración de SQLAlchemy
 try:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={'sslmode': 'require'})
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base = declarative_base()
     print(f"✅ Conectado a la base de datos: {DB_NAME} en {DB_HOST}:{DB_PORT}")
@@ -158,6 +158,7 @@ def read_root():
         "message": "Photo Picker API está funcionando correctamente",
         "database": DB_NAME,
         "host": DB_HOST,
+        "port": DB_PORT,
         "status": "active"
     }
 
@@ -167,10 +168,22 @@ def health_check(db: Session = Depends(get_db)):
     try:
         # Intentar una consulta simple para verificar la conexión a la base de datos
         db.execute("SELECT 1")
+        
+        # Verificar directorios
+        upload_dir_exists = os.path.exists(UPLOAD_DIR)
+        upload_dir_writable = os.access(UPLOAD_DIR, os.W_OK)
+        
         return {
             "status": "healthy",
             "database": "connected",
             "database_name": DB_NAME,
+            "database_host": DB_HOST,
+            "database_port": DB_PORT,
+            "upload_dir": {
+                "exists": upload_dir_exists,
+                "writable": upload_dir_writable,
+                "path": UPLOAD_DIR
+            },
             "timestamp": datetime.now().isoformat(),
             "environment": "production" if os.getenv("RENDER") else "development"
         }
@@ -186,7 +199,19 @@ def show_config():
         "db_name": DB_NAME,
         "db_user": DB_USER,
         "upload_dir": UPLOAD_DIR,
-        "thumbnail_dir": THUMBNAIL_DIR
+        "thumbnail_dir": THUMBNAIL_DIR,
+        "database_url": f"postgresql://{DB_USER}:******@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    }
+
+@app.get("/test-upload")
+async def test_upload_endpoint():
+    """Endpoint para probar que el upload funciona"""
+    return {
+        "status": "upload_endpoint_available",
+        "method": "POST",
+        "endpoint": "/upload",
+        "required_fields": ["file (image)"],
+        "optional_fields": ["user_id", "description", "tags", "is_public", "device_info", "app_version"]
     }
 
 @app.get("/images/")
@@ -218,7 +243,7 @@ def get_image(image_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Imagen no encontrada")
     return ImageResponseSchema.from_orm(image)
 
-@app.post("/images/")
+@app.post("/upload")  # ✅ Endpoint corregido a /upload
 async def upload_image(
     file: UploadFile = File(...),
     user_id: str = Form(None),
@@ -229,28 +254,36 @@ async def upload_image(
     app_version: str = Form(None),
     db: Session = Depends(get_db)
 ):
+    # Validar tipo de archivo
+    allowed_mime_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/jpg"]
+    if file.content_type not in allowed_mime_types:
+        raise HTTPException(status_code=400, detail="Tipo de archivo no permitido. Solo se permiten imágenes JPEG, PNG, GIF y WebP")
+    
     # Generar un nombre único para el archivo
     file_extension = os.path.splitext(file.filename)[1]
     unique_filename = f"{uuid.uuid4()}{file_extension}"
     file_path = os.path.join(UPLOAD_DIR, unique_filename)
     
     # Guardar el archivo
-    contents = await file.read()
-    with open(file_path, "wb") as f:
-        f.write(contents)
+    try:
+        contents = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(contents)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al guardar archivo: {str(e)}")
     
     # Procesar tags
     tag_list = []
     if tags:
         tag_list = [tag.strip() for tag in tags.split(",")]
     
-    # Crear registro en la base de datos
+    # Crear registro en la base de datos con URL accesible
     db_image = Image(
         filename=unique_filename,
         original_filename=file.filename,
         file_size=len(contents),
         mime_type=file.content_type,
-        file_path=file_path,
+        file_path=f"/uploads/{unique_filename}",  # ✅ Ruta accesible via URL
         description=description,
         tags=tag_list,
         is_public=is_public,
@@ -259,13 +292,24 @@ async def upload_image(
         app_version=app_version
     )
     
-    db.add(db_image)
-    db.commit()
-    db.refresh(db_image)
+    try:
+        db.add(db_image)
+        db.commit()
+        db.refresh(db_image)
+    except Exception as e:
+        # Eliminar archivo si hay error en la BD
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=500, detail=f"Error en base de datos: {str(e)}")
     
     return {
         "message": "Imagen subida exitosamente",
-        "image": ImageResponseSchema.from_orm(db_image)
+        "image_id": db_image.id,
+        "filename": unique_filename,
+        "original_filename": file.filename,
+        "file_url": f"https://photo-picker-api-1.onrender.com/uploads/{unique_filename}",
+        "file_size": len(contents),
+        "upload_date": db_image.upload_date.isoformat()
     }
 
 @app.put("/images/{image_id}")
@@ -304,12 +348,16 @@ def delete_image(image_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Imagen no encontrada")
     
     # Eliminar el archivo físico
-    if os.path.exists(image.file_path):
-        os.remove(image.file_path)
+    physical_path = os.path.join(UPLOAD_DIR, image.filename)
+    if os.path.exists(physical_path):
+        os.remove(physical_path)
     
     # Eliminar la miniatura si existe
-    if image.thumbnail_path and os.path.exists(image.thumbnail_path):
-        os.remove(image.thumbnail_path)
+    if image.thumbnail_path:
+        thumbnail_filename = os.path.basename(image.thumbnail_path)
+        thumbnail_path = os.path.join(THUMBNAIL_DIR, thumbnail_filename)
+        if os.path.exists(thumbnail_path):
+            os.remove(thumbnail_path)
     
     # Eliminar el registro de la base de datos
     db.delete(image)
