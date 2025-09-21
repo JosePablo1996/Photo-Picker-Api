@@ -4,14 +4,15 @@ services:
   - type: web
     name: photo-picker-api
     env: python
-    region: ohio  # Puedes cambiar a us-east, us-west, etc.
-    plan: free  # O upgrade to starter, standard, etc.
+    region: ohio
+    plan: free
     branch: main
     
     # Comandos de construcción
     buildCommand: |
       pip install --upgrade pip
       pip install -r requirements.txt
+      mkdir -p uploads thumbnails
     
     # Comando de inicio
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 300
@@ -19,13 +20,13 @@ services:
     # Variables de entorno
     envVars:
       - key: DB_HOST
-        fromSecret: DB_HOST
+        value: 20.84.99.214
       - key: DB_PORT
-        fromSecret: DB_PORT
+        value: 443
       - key: DB_NAME
-        fromSecret: DB_NAME
+        value: PhotoPickerAPI
       - key: DB_USER
-        fromSecret: DB_USER
+        value: photopicker_user
       - key: DB_PASSWORD
         fromSecret: DB_PASSWORD
       - key: UPLOAD_DIR
@@ -35,7 +36,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: PGSSLMODE
-        value: require
+        value: disable
       - key: HOST
         value: 0.0.0.0
       - key: PORT
@@ -50,8 +51,6 @@ services:
       mountPath: /opt/render/project/src/uploads
       sizeGB: 1
 
-    # Auto-deploy configuration
     autoDeploy: true
 
-# Secrets que necesitas configurar en el dashboard de Render
-# DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+# Solo necesitas configurar el secret DB_PASSWORD en el dashboard de Render

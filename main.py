@@ -16,9 +16,9 @@ load_dotenv()
 
 # Configuración desde variables de entorno
 DB_HOST = os.getenv("DB_HOST", "20.84.99.214")
-DB_PORT = os.getenv("DB_PORT", "443")  # Puerto 443 para PostgreSQL
+DB_PORT = os.getenv("DB_PORT", "443")
 DB_NAME = os.getenv("DB_NAME", "PhotoPickerAPI")
-DB_USER = os.getenv("DB_USER", "photopicker_user")  # Usuario correcto
+DB_USER = os.getenv("DB_USER", "photopicker_user")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "uPxBHn]Ag9H~N4'K")
 
 # Validar que todas las variables críticas estén presentes
@@ -32,18 +32,27 @@ if missing_vars:
 # Codificar la contraseña para la URL
 ENCODED_PASSWORD = quote_plus(DB_PASSWORD)
 
-# Cadena de conexión a PostgreSQL con puerto 443
-DATABASE_URL = f"postgresql://{DB_USER}:{ENCODED_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# Cadena de conexión a PostgreSQL SIN SSL
+DATABASE_URL = f"postgresql://{DB_USER}:{ENCODED_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=disable"
 
-# Configuración de SQLAlchemy
+# Configuración de SQLAlchemy SIN SSL
 try:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={'sslmode': 'require'})
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={'sslmode': 'disable'})
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base = declarative_base()
-    print(f"✅ Conectado a la base de datos: {DB_NAME} en {DB_HOST}:{DB_PORT}")
+    print(f"✅ Conectado a la base de datos: {DB_NAME} en {DB_HOST}:{DB_PORT} (sin SSL)")
 except Exception as e:
     print(f"❌ Error conectando a la base de datos: {e}")
-    raise
+    # Intentar conexión alternativa sin puerto específico
+    try:
+        DATABASE_URL_FALLBACK = f"postgresql://{DB_USER}:{ENCODED_PASSWORD}@{DB_HOST}/{DB_NAME}?sslmode=disable"
+        engine = create_engine(DATABASE_URL_FALLBACK, pool_pre_ping=True, connect_args={'sslmode': 'disable'})
+        SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        Base = declarative_base()
+        print(f"✅ Conectado a la base de datos usando puerto default 5432 (sin SSL)")
+    except Exception as e2:
+        print(f"❌ Error en conexión alternativa: {e2}")
+        raise
 
 # Modelo de la base de datos para imágenes
 class Image(Base):
@@ -92,7 +101,7 @@ class ImageSchema(BaseModel):
     app_version: str = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True  # Cambiado de orm_mode a from_attributes
 
 class ImageResponseSchema(BaseModel):
     id: int
@@ -114,7 +123,7 @@ class ImageResponseSchema(BaseModel):
     app_version: str = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True  # Cambiado de orm_mode a from_attributes
 
 # Instancia de la aplicación FastAPI
 app = FastAPI(
@@ -159,6 +168,7 @@ def read_root():
         "database": DB_NAME,
         "host": DB_HOST,
         "port": DB_PORT,
+        "ssl_mode": "disabled",
         "status": "active"
     }
 
@@ -179,6 +189,7 @@ def health_check(db: Session = Depends(get_db)):
             "database_name": DB_NAME,
             "database_host": DB_HOST,
             "database_port": DB_PORT,
+            "ssl_mode": "disabled",
             "upload_dir": {
                 "exists": upload_dir_exists,
                 "writable": upload_dir_writable,
@@ -200,7 +211,8 @@ def show_config():
         "db_user": DB_USER,
         "upload_dir": UPLOAD_DIR,
         "thumbnail_dir": THUMBNAIL_DIR,
-        "database_url": f"postgresql://{DB_USER}:******@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        "ssl_mode": "disabled",
+        "database_url": f"postgresql://{DB_USER}:******@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=disable"
     }
 
 @app.get("/test-upload")
@@ -243,7 +255,7 @@ def get_image(image_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Imagen no encontrada")
     return ImageResponseSchema.from_orm(image)
 
-@app.post("/upload")  # ✅ Endpoint corregido a /upload
+@app.post("/upload")
 async def upload_image(
     file: UploadFile = File(...),
     user_id: str = Form(None),
@@ -283,7 +295,7 @@ async def upload_image(
         original_filename=file.filename,
         file_size=len(contents),
         mime_type=file.content_type,
-        file_path=f"/uploads/{unique_filename}",  # ✅ Ruta accesible via URL
+        file_path=f"/uploads/{unique_filename}",
         description=description,
         tags=tag_list,
         is_public=is_public,
@@ -307,7 +319,7 @@ async def upload_image(
         "image_id": db_image.id,
         "filename": unique_filename,
         "original_filename": file.filename,
-        "file_url": f"https://photo-picker-api-1.onrender.com/uploads/{unique_filename}",
+        "file_url": f"/uploads/{unique_filename}",
         "file_size": len(contents),
         "upload_date": db_image.upload_date.isoformat()
     }
@@ -377,8 +389,9 @@ if __name__ == "__main__":
     print(f"📊 Base de datos: {DB_NAME}")
     print(f"🌐 Host: {DB_HOST}:{DB_PORT}")
     print(f"👤 Usuario: {DB_USER}")
+    print(f"🔒 SSL Mode: disabled")
     print(f"📁 Directorio uploads: {UPLOAD_DIR}")
-    print(f"🔗 URL de conexión: postgresql://{DB_USER}:******@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+    print(f"🔗 URL de conexión: postgresql://{DB_USER}:******@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=disable")
     print("=" * 50)
     
     uvicorn.run(app, host=host, port=port)
